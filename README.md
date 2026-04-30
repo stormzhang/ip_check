@@ -95,6 +95,28 @@ Add the following to your Claude Desktop config file (`~/Library/Application Sup
 | `check_ip_risk` | Check risk score for a specific IP address |
 | `check_dns` | Check DNS server configuration |
 
+#### Usage
+
+Once configured, just ask Claude in natural language:
+
+- "Check if my network environment is good for AI tools"
+- "Is my current IP risky?"
+- "Check my DNS configuration"
+
+Claude will automatically call the corresponding tool and return a structured diagnostic report, for example:
+
+```
+> Check my network environment
+
+Network:   LAN IP 192.168.1.100 | IPv6 disabled ✓
+DNS:       1.1.1.1 Cloudflare (US) ✓
+Public IP: 203.0.113.50 | United States / California
+ISP:       Residential IP | Risk 12/100 (low) ✓
+Timezone:  America/Los_Angeles — consistent ✓
+
+Your network environment looks good for AI tools.
+```
+
 ---
 
 ## 中文
@@ -183,6 +205,28 @@ claude mcp add --transport stdio ip-check -- ip-check-mcp
 | `check_all` | 全量检测 — IP、DNS、代理、风险、时区 |
 | `check_ip_risk` | 查询指定 IP 的风险评分 |
 | `check_dns` | 检测 DNS 服务器配置 |
+
+#### 使用方式
+
+配置完成后，直接用自然语言向 Claude 提问即可：
+
+- "帮我检查下网络环境适不适合跑 AI 工具"
+- "我现在的 IP 有风险吗"
+- "检查下我的 DNS 配置"
+
+Claude 会自动调用对应工具，返回结构化的诊断报告，例如：
+
+```
+> 帮我检查下网络环境
+
+网络：    局域网 IP 192.168.1.100 | IPv6 已禁用 ✓
+DNS：     1.1.1.1 Cloudflare (US) ✓
+公网 IP： 203.0.113.50 | United States / California
+ISP：     住宅 IP | 风险 12/100（低风险）✓
+时区：    America/Los_Angeles — 一致 ✓
+
+你的网络环境适合运行 AI 工具。
+```
 
 ---
 

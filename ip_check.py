@@ -13,6 +13,9 @@ import subprocess
 import datetime
 import re
 import platform
+import json
+import urllib.request
+import urllib.parse
 
 # ── 编码修正（Windows cmd 默认非 UTF-8）────────────────────
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
@@ -24,71 +27,50 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
 IS_WIN = platform.system() == 'Windows'
 
 
-# ── 依赖自动安装 ──────────────────────────────────────────
+# ── 可选依赖自动安装（核心 HTTP 已用标准库，无需第三方）────
 def _pip_install(packages):
-    """安装包；pip 不可用时先尝试 ensurepip 引导，仍失败则打印平台对应指引。"""
-    # 第一次尝试：直接 pip install
-    try:
-        subprocess.check_call(
-            [sys.executable, '-m', 'pip', 'install', '--quiet'] + packages
-        )
-        return True
-    except subprocess.CalledProcessError:
-        pass
+    """多策略安装：普通 → --user → --break-system-packages；适配 PEP 668 环境。"""
+    base = [sys.executable, '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check']
+    attempts = [
+        base + packages,
+        base + ['--user'] + packages,
+        base + ['--user', '--break-system-packages'] + packages,
+    ]
+    for cmd in attempts:
+        try:
+            subprocess.check_call(cmd)
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
 
-    # pip 本身可能未安装，用 ensurepip 引导（Python 3.4+ 内置）
-    print("pip 不可用，正在尝试自动引导安装 pip...")
+    # pip 可能未安装，用 ensurepip 引导后再试一轮
     try:
         subprocess.check_call([sys.executable, '-m', 'ensurepip', '--upgrade'])
-        subprocess.check_call(
-            [sys.executable, '-m', 'pip', 'install', '--quiet'] + packages
-        )
-        return True
-    except subprocess.CalledProcessError:
+        for cmd in attempts:
+            try:
+                subprocess.check_call(cmd)
+                return True
+            except subprocess.CalledProcessError:
+                continue
+    except (subprocess.CalledProcessError, FileNotFoundError):
         pass
-
-    # 彻底失败：给出平台对应的手动安装指引
-    system = platform.system()
-    print("\n无法自动安装 pip，请手动安装后重试：\n")
-    if system == 'Windows':
-        print("  1. 下载 https://bootstrap.pypa.io/get-pip.py")
-        print("  2. 在命令提示符中运行: python get-pip.py")
-    elif system == 'Darwin':
-        print("  方法一: python3 -m ensurepip --upgrade")
-        print("  方法二（Homebrew）: brew install python3")
-    else:
-        print("  Ubuntu / Debian : sudo apt  install python3-pip")
-        print("  CentOS / RHEL   : sudo yum  install python3-pip")
-        print("  Fedora          : sudo dnf  install python3-pip")
-        print("  Arch            : sudo pacman -S python-pip")
-    print(f"\n安装 pip 后运行: pip install {' '.join(packages)}")
     return False
 
 
 def _ensure_deps():
+    """仅处理可选增强包：Windows 彩色输出与时区数据；失败则静默降级。"""
     needed = []
 
-    # requests：必须
-    try:
-        import requests  # noqa: F401
-    except ImportError:
-        needed.append('requests')
-
-    # colorama：Windows 彩色输出
     if IS_WIN:
         try:
             import colorama  # noqa: F401
         except ImportError:
             needed.append('colorama')
-
-    # tzdata：Windows 下 zoneinfo 需要它才能识别 IANA 时区
-    if IS_WIN:
         try:
             import tzdata  # noqa: F401
         except ImportError:
             needed.append('tzdata')
 
-    # backports.zoneinfo：Python < 3.9 的回退
     if sys.version_info < (3, 9):
         try:
             from backports import zoneinfo  # noqa: F401
@@ -98,24 +80,20 @@ def _ensure_deps():
     if not needed:
         return
 
-    print(f"缺少依赖包: {', '.join(needed)}")
-    try:
-        ans = input("是否自动安装？[Y/n] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        ans = 'n'
-
-    if ans not in ('', 'y', 'yes'):
-        print(f"请手动安装后重试: pip install {' '.join(needed)}")
-        sys.exit(1)
-
-    # 尝试安装
+    print(f"检测到可选依赖缺失: {', '.join(needed)}，尝试自动安装...")
     if not _pip_install(needed):
-        sys.exit(1)
-    print()
+        print(f"  自动安装失败，将以降级模式继续运行。如需完整功能可手动安装: pip install {' '.join(needed)}\n")
 
 _ensure_deps()
 
-import requests  # noqa: E402
+
+# ── 标准库 HTTP 封装（替代 requests，零第三方依赖）─────────
+def _http_get_json(url, params=None, timeout=6):
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'claude-check/1.0'})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode('utf-8', errors='replace'))
 
 
 # ── 已知 DNS ──────────────────────────────────────────────
@@ -330,23 +308,19 @@ def get_dns_servers():
 
 def get_public_info():
     try:
-        resp = requests.get(
+        return _http_get_json(
             "http://ip-api.com/json/",
             params={"fields": "status,message,country,regionName,city,isp,org,proxy,hosting,query,timezone"},
-            timeout=6,
         )
-        return resp.json()
     except Exception as e:
         return {"status": "fail", "message": str(e)}
 
 def get_ip_risk(ip):
     try:
-        resp = requests.get(
+        data = _http_get_json(
             f"https://proxycheck.io/v2/{ip}",
             params={"risk": 1, "vpn": 1, "asn": 1},
-            timeout=6,
-        )
-        data = resp.json().get(ip, {})
+        ).get(ip, {})
         risk  = data.get("risk")
         itype = data.get("type", "")
         proxy = data.get("proxy", "")
@@ -370,12 +344,10 @@ def get_ip_risk(ip):
 
 def get_stopforumspam(ip):
     try:
-        resp = requests.get(
+        data = _http_get_json(
             "https://api.stopforumspam.org/api",
             params={"json": 1, "ip": ip},
-            timeout=6,
-        )
-        data = resp.json().get("ip", {})
+        ).get("ip", {})
         if not data.get("appears"):
             return [ok("未收录  低风险 ✓")]
         confidence = float(data.get("confidence", 0))

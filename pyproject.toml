@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-ipcheck"
-version = "0.2.0"
+version = "0.2.1"
 description = "A lightweight diagnostic tool for AI developers to verify network environment compatibility and IP reputation."
 readme = "README.md"
 license = {text = "MIT"}
